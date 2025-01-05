@@ -1,0 +1,76 @@
+version: "3.8"
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"        # RabbitMQ messaging port
+      - "15672:15672"      # RabbitMQ Management UI port
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  django:
+    build:
+      context: .
+    container_name: django
+    command: python manage.py runserver 0.0.0.0:8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/code
+      - ./media:/code/media
+    depends_on:
+      - rabbitmq
+    environment:
+      - DJANGO_SETTINGS_MODULE=rabbitmqwithDjango.settings
+      - CELERY_BROKER_URL=pyamqp://guest@rabbitmq//
+      - CELERY_RESULT_BACKEND=rpc://
+
+  celery-worker:
+    build:
+      context: .
+    container_name: celery-worker
+    command: celery -A rabbitmqwithDjango worker --loglevel=info
+    volumes:
+      - .:/code
+      - ./media:/code/media  # Shared media directory
+    depends_on:
+      - rabbitmq
+    environment:
+      - DJANGO_SETTINGS_MODULE=rabbitmqwithDjango.settings
+      - CELERY_BROKER_URL=pyamqp://guest@rabbitmq//
+      - CELERY_RESULT_BACKEND=rpc://
+
+
+  flower:
+    image: mher/flower:latest
+    container_name: flower
+    command: celery flower --port=5555 --broker=amqp://guest:guest@rabbitmq:5672//
+    ports:
+      - "5555:5555"
+    depends_on:
+      - rabbitmq
+    environment:
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: django-db
+
+
+
+  celery-beat:
+    build:
+      context: .
+    container_name: celery-beat
+    command: celery -A rabbitmqwithDjango beat --loglevel=info
+    volumes:
+      - .:/code
+    depends_on:
+      - rabbitmq
+    environment:
+      - DJANGO_SETTINGS_MODULE=rabbitmqwithDjango.settings
+      - CELERY_BROKER_URL=pyamqp://guest@rabbitmq//
+      - CELERY_RESULT_BACKEND=rpc://
+
+volumes:
+  media:
